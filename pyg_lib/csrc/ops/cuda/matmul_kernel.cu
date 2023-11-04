@@ -121,6 +121,38 @@ void grouped_matmul_out_kernel(const at::TensorList input,
                                const at::TensorList other,
                                const at::TensorList out,
                                bool segment) {
+
+  // Finn and Sid, test with our own GemmKernel for bfloat16
+  // Assume full-sized A100 GPU
+  if (query.dtype() == at::ScalarType::BFloat16) {
+    using DefaultGemmKernel_BF16 =
+            typename cutlass::gemm::kernel::DefaultGemmGrouped<
+                cutlass::bfloat16_t,                                   // Element A
+                cutlass::layout::RowMajor,               // Layout A
+                cutlass::ComplexTransform::kNone,        //
+                1,                                       // Granularity A
+                cutlass::bfloat16_t,                                   // Element B
+                cutlass::layout::RowMajor,               // Layout B
+                cutlass::ComplexTransform::kNone,        //
+                1,                                       // Granularity B
+                cutlass::bfloat16_t,                                   // Element C&D
+                cutlass::layout::RowMajor,               // Layout C&D
+                cutlass::bfloat16_t,                                   // Element Accumulator
+                cutlass::arch::OpClassTensorOp,          // Operator Class Tag
+                cutlass::arch::Sm80,                     // Architecture
+                cutlass::gemm::GemmShape<256, 128, 32>,  // Threadblock-level Tile
+                cutlass::gemm::GemmShape<64, 64, 32>,    // Warp-level Tile
+                cutlass::gemm::GemmShape<16, 8, 8>,      // Warp-level Tile
+                cutlass::epilogue::thread::LinearCombination<  // Epilogue
+                    cutlass::bfloat16_t, 1, cutlass::bfloat16_t, cutlass::bfloat16_t>,                   //
+                cutlass::gemm::threadblock::        // Swizzling Operator
+                GemmIdentityThreadblockSwizzle<8>,  //
+                3                                   // Stages
+                >::GemmKernel;          
+    run_grouped_gemm<DefaultGemmKernel_TF32>(input, other, out, segment);                    
+  } 
+
+  
   if (!props_queried) {
     props = get_dev_prop();
     props_queried = true;
@@ -323,3 +355,4 @@ TORCH_LIBRARY_IMPL(pyg, CUDA, m) {
 
 }  // namespace ops
 }  // namespace pyg
+
